@@ -17,6 +17,11 @@ dependencies = [
     "more-itertools",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
 [tool.setuptools]
 py-modules = ["tracker"]
 
