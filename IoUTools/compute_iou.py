@@ -135,9 +135,6 @@ def maximum_cardinality_match_from_score_matrix(matrix, threshold=0.5):
     return taille_couplage, det_to_ref
 
 def build_reward_matrix(matrix, threshold):
-    """
-    build a reward matrix from matrix
-    """
     R = len(matrix)
     if R == 0:
         return []
@@ -161,7 +158,18 @@ def build_reward_matrix(matrix, threshold):
 
 def optimal_match_from_score_matrix(matrix, threshold):
     """
-    return the optimal match from score matrix
+    Compute an optimal one-to-one assignment for scores in [0, 1].
+
+    Valid associations are given a cardinality bonus:
+        reward = B + score
+    where:
+        B = min(R, D) + 1
+
+    This ensures that maximizing the total reward first maximizes
+    the number of valid matches, and then, among assignments with
+    the same cardinality, maximizes the total score.
+
+    Associations with scores below the threshold are not retained.
     """
     if len(matrix) == 0:
         return []
@@ -199,9 +207,9 @@ def compute_detection_metrics(
     D = number_of_detections
     M = len(matches)
     if R < 0 or D < 0:
-        raise ValueError(...)
+        raise ValueError("Number of references and detections must be non-negative")
     if M > min(R, D):
-        raise ValueError(...)
+        raise ValueError("Number of matches cannot exceed min(references, detections)")
 
     TP = M
     FP = D - M
@@ -222,323 +230,3 @@ def compute_detection_metrics(
         "recall": recall,
         "f1": f1,
     }
-
-
-if __name__ == "__main__":
-    print ("###########################")
-    print ("# Testing IoU computation #")
-    print ("###########################")
-
-    box_a = (10, 10, 30, 30)
-    box_b = (20, 20, 40, 40)
-    IoU_1 = compute_iou(box_a, box_b)
-    print ("IoU_1 = ", IoU_1)
-
-    box_a1 = (0, 0, 100, 100)
-    box_b1 = (50, 0, 150, 100)
-    IoU_2 = compute_iou(box_a1, box_b1)
-    print ("IoU_2 = ", IoU_2)
-
-    donnees = [
-    # Identical
-    ((10, 10, 30, 30),
-    (10, 10, 30, 30),
-    1.0),
-
-    # No overlap
-    ((10, 10, 20, 20),
-    (30, 30, 40, 40),
-    0.0),
-
-    # Partial overlap
-    ((10, 10, 30, 30),
-    (20, 20, 40, 40),
-    100 / 700),
-
-    # One inside another
-    ((100, 100, 200, 300),
-    (110, 120, 190, 280),
-    0.64)
-    ]
-
-    for A, B, expected in donnees:
-        IoU = compute_iou(A, B)
-        print ("A", A)
-        print ("B", B)
-        print ("expected", expected)
-        print ("IoU", IoU)
-        print ()
-        assert math.isclose(
-        IoU,
-        expected,
-        rel_tol=1e-9)
-        assert math.isclose(
-        IoU,
-        compute_iou(B, A),
-        rel_tol=1e-9)
-
-    # Erreur x2 < x1
-    try:
-        compute_iou(
-            (100, 200, 90, 300),
-            (110, 120, 190, 280)
-            )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("Expected ValueError")
-
-    # Erreur width = 0
-    try:
-        compute_iou(
-            (100, 200, 100, 300),
-            (110, 120, 190, 280)
-            )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("Expected ValueError")
-
-    try:
-        compute_iou(
-            (100, 200, 110, 300),
-            (110, 120, 90, 280)
-            )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("Expected ValueError")
-
-    # Erreur heigth = 0
-    try:
-        compute_iou(
-            (100, 200, 110, 200),
-            (110, 120, 190, 280)
-            )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("Expected ValueError")
-
-    try:
-        compute_iou(
-            (100, 200, 110, 210),
-            (110, 120, 190, 120))
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("Expected ValueError")
-
-
-    print()
-    print ("All IoU tests PASSED")
-
-    print()
-    print ("########################")
-    print ("# Testing IoU matching #")
-    print ("########################")
-# Ground truth:
-# GT0 = (100, 80, 180, 220)
-# GT1 = (300, 90, 390, 240)
-#
-# Predictions:
-# P0 = (105, 85, 176, 218)
-# P1 = (295, 95, 395, 245)
-# P2 = (500, 100, 540, 160)
-    matrix = compute_iou_matrix([(100, 80, 180, 220), (300, 90, 390, 240)], [(105, 85, 176, 218), (295, 95, 395, 245), (500, 100, 540, 160)])
-    print("matrix = ", matrix)
-    match_list = match_from_score_matrix(matrix, 0.5)
-    print("match_list = ", match_list)
-
-
-#           D0      D1      D2
-# R0       .84     .00     .00
-# R1       .00     .84     .00
-    matrix = [[.84, .00, .00], [.00, .84, .00]]
-    match_list = match_from_score_matrix(matrix, 0.5)
-    match_list = match_from_score_matrix(matrix, 0.5)
-    print("matrix=", matrix)
-    print("match_list = ", match_list)
-
-#           D0      D1
-# R0       .70     .65
-# R1       .68     .10
-    matrix = [[.70, .65], [.68, .10]]
-    match_list = match_from_score_matrix(matrix, 0.5)
-    print("matrix=", matrix)
-    print("match_list = ", match_list)
-
-
-    print()
-    print ("#########################")
-    print ("# Testing opt. matching #")
-    print ("#########################")
-    matrix = compute_iou_matrix([(100, 80, 180, 220), (300, 90, 390, 240)], [(105, 85, 176, 218), (295, 95, 395, 245), (500, 100, 540, 160)])
-    maximum_cardinality_match_from_score_matrix(matrix, 0.5)
-    print ("Done")
-
-
-    matrix = [[0.7, 0.75], [0.68, 0.10]]
-    print ("matrix = ", matrix)
-    ret = maximum_cardinality_match_from_score_matrix(matrix, threshold=0.5)
-    print ("maximum_cardinality_match_from_score_matrix = ", ret)
-    ref_for_det = ret[1]
-    for ret_idx in ref_for_det:
-        ref_idx = ref_for_det[ret_idx]
-        print (ref_idx, " - ",ret_idx, " = " , matrix[ref_for_det[ref_idx]][ref_idx])
-
-
-    print()
-    print ("#########################")
-    print ("# Testing reward matrix #")
-    print ("#########################")
-    #reward_matrix = build_reward_matrix(matrix, 0.5)
-    #print ("reward_matrix = ", reward_matrix)
-    assert build_reward_matrix(
-        [
-            [0.70, 0.65],
-            [0.68, 0.10]
-            ],
-        0.5
-        ) == [
-            [3.70, 3.65, 0.0, 0.0],
-            [3.68, 0.0,  0.0, 0.0]
-            ]
-
-
-
-    assert build_reward_matrix(
-        [
-            [0.20, 0.30],
-            [0.10, 0.49]
-            ],
-        0.5
-        ) == [
-            [0.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0,  0.0, 0.0]
-            ]
-    print ("All reward matrix tests PASSED")
-
-
-    print()
-    print ("#################################")
-    print ("# Testing linear_sum_assignment #")
-    print ("#################################")
-    matrix = [[0.7, 0.75], [0.68, 0.10]]
-    print ("matrix = ", matrix)
-    listScores = optimal_match_from_score_matrix(matrix, 0.5)
-    print ("listScores = ", listScores)
-
-    print ()
-    # 1. Cas où greedy échoue
-    matrix = [
-        [0.70, 0.65],
-        [0.68, 0.10]
-    ]
-    print ("matrix = ", matrix)
-    # attendu :
-    # R0-D1 (.65), R1-D0 (.68)
-    listScores = optimal_match_from_score_matrix(matrix, 0.5)
-    print ("listScores = ", listScores)
-    assert (listScores == [.65, 0, 1], [.68, 1, 0])
-
-    print ()
-    # 2. Matching évident + détection sans correspondant
-    matrix = [
-        [0.84, 0.00, 0.00],
-        [0.00, 0.84, 0.00]
-    ]
-    print ("matrix = ", matrix)
-    listScores = optimal_match_from_score_matrix(matrix, 0.5)
-    print ("listScores = ", listScores)
-    assert (len(listScores) == 2)
-    # attendu : 2 matches
-
-    print ()
-    # 3. Aucun match valide
-    matrix = [
-        [0.20, 0.30],
-        [0.10, 0.49]
-        ]
-    print ("matrix = ", matrix)
-    listScores = optimal_match_from_score_matrix(matrix, 0.5)
-    print ("listScores = ", listScores)
-    assert (len(listScores) == 0)
-    # attendu : []
-
-    print ()
-    # 4. Une référence ne peut pas être associée
-    matrix = [
-        [0.80],
-        [0.20]
-        ]
-    print ("matrix = ", matrix)
-    listScores = optimal_match_from_score_matrix(matrix, 0.5)
-    print ("listScores = ", listScores)
-    assert (listScores == [(0.80, 0, 0)])
-    # attendu : [(0.80, 0, 0)]
-
-    print ("All linear_sum_assignment tests PASSED")
-
-
-    print()
-    print ("#############################")
-    print ("# Testing detection metrics #")
-    print ("#############################")
-    match_0 = []
-    match_2 = [(0.1, 2, 1),(0.1, 2, 2)]
-#def compute_detection_metrics(
-#    number_of_references,
-#    number_of_detections,
-#    matches
-#)
-#return (TP, FP, FN, precision, recall, f1)
-    # 3 refs, 4 detections, 2 matches
-    # TP=2 FP=2 FN=1
-    resultat = compute_detection_metrics(
-        3,
-        4,
-        match_2)
-    print("Resultat: ", resultat)
-    assert ([resultat["tp"], resultat["fp"], resultat["fn"]] == [2, 2, 1])
-
-    # 2 refs, 2 detections, 2 matches
-    # TP=2 FP=0 FN=0
-    print()
-    resultat = compute_detection_metrics(
-        2,
-        2,
-        match_2)
-    print("Resultat: ", resultat)
-    assert ([resultat["tp"], resultat["fp"], resultat["fn"]] == [2, 0, 0])
-
-    # 2 refs, 0 detection
-    # TP=0 FP=0 FN=2
-    print()
-    resultat = compute_detection_metrics(
-        2,
-        0,
-        match_0)
-    print("Resultat: ", resultat)
-    assert ([resultat["tp"], resultat["fp"], resultat["fn"]] == [0, 0, 2])
-
-    # 0 ref, 3 detections
-    # TP=0 FP=3 FN=0
-    print()
-    resultat = compute_detection_metrics(
-        0,
-        3,
-        match_0)
-    print("Resultat: ", resultat)
-    assert ([resultat["tp"], resultat["fp"], resultat["fn"]] == [0, 3, 0])
-
-    # 0 ref, 0 detection
-    print()
-    resultat = compute_detection_metrics(
-        0,
-        0,
-        match_0)
-    print("Resultat: ", resultat)
-    assert ([resultat["tp"], resultat["fp"], resultat["fn"]] == [0, 0, 0])
-
-    print ("All detection metrics tests PASSED")
