@@ -1,6 +1,69 @@
 #!/usr/bin/python3
 import math
 from scipy.optimize import linear_sum_assignment
+from dataclasses import dataclass, field
+import numpy as np
+from numpy.typing import NDArray
+
+from typing import TypeAlias
+
+BBox: TypeAlias = tuple[float, float, float, float]
+BoxesArray: TypeAlias = NDArray[np.float32]
+# Bounding-box convention:
+#   box = (x1, y1, x2, y2)
+#   x1 < x2, y1 < y2
+#   coordinates are floating-point image coordinates
+#
+# Scalar representation:
+#   BBox = tuple[float, float, float, float]
+#
+# Batch representation:
+#   np.ndarray, shape (N, 4), dtype float32
+#
+# Empty batch:
+#   shape (0, 4)
+
+"""Array of bounding boxes with shape (N, 4).
+
+Each row contains (x1, y1, x2, y2).
+The empty representation has shape (0, 4).
+"""
+
+"""Pairwise IoU matrix with shape (R, D).
+
+R = number of reference boxes.
+D = number of detection boxes.
+"""
+IoUMatrix: TypeAlias = NDArray[np.float32]
+RewardMatrix: TypeAlias = NDArray[np.float32]
+ScoreMatrix: TypeAlias = NDArray[np.float32]
+
+from typing import Tuple
+BBox = tuple[float, float, float, float]
+box : BBox = (10.0, 20.0, 30.0, 50.0)
+
+@dataclass(frozen=True)
+class Detection:
+    bbox: BBox
+    class_name: str
+    confidence: float
+
+@dataclass
+class Track:
+    id: int
+    bbox: BBox
+    class_name: str
+    confidence: float
+    # temporal state
+    # history: deque[bool]
+    # status: TrackingStatus
+    # trajectory: list[Point]
+    # last_detection: Detection | None = None
+
+# def compute_iou(box_a: BBox, box_b: BBox) -> float:
+
+RECT_LENGTH = 4
+
 
 # (ax1, ay1, ax2, ay2)
 # (bx1, by1, bx2, by2)
@@ -50,14 +113,101 @@ def compute_iou(box_a, box_b):
         raise RuntimeError("division by 0")
     return area_inter / union_area
 
-def compute_iou_matrix(reference_boxes, detected_boxes):
-    retVal = []
-    for ref_box in reference_boxes:
-        row = []
-        for detect_box in detected_boxes:
-            row.append(compute_iou(ref_box, detect_box))
-        retVal.append(row)
-    return retVal
+
+
+#if np.any(arr[:, 0] >= arr[:, 2]):
+#    ...
+#if np.any(arr[:, 1] >= arr[:, 3]):
+#    ...
+def _as_boxes_array(
+    boxes: list[BBox] | BoxesArray,
+    ) -> BoxesArray:
+    raw = np.asarray(boxes)
+
+    #boxAr : BoxesArray
+    #raise ValueError("DBG_ValueError")
+    #return boxAr
+
+    # Python empty sequence: normalize to canonical empty BoxesArray.
+    if raw.shape == (0,):
+        return np.empty((0, RECT_LENGTH), dtype=np.float32)
+
+    # Already normalized empty array: valid.
+    if raw.shape == (0, RECT_LENGTH):
+        return raw.astype(np.float32, copy=False)
+
+    if raw.ndim != 2 or raw.shape[1] != RECT_LENGTH:
+        raise ValueError(
+            f"Boxes must have shape (N, {RECT_LENGTH}), "
+            f"got {raw.shape}"
+        )
+
+    if not np.issubdtype(raw.dtype, np.number):
+        raise TypeError(
+            f"Box coordinates must be numeric, got dtype {raw.dtype}"
+        )
+
+    box_array = raw.astype(np.float32, copy=False)
+
+    if not np.all(np.isfinite(box_array)):
+        raise ValueError("Box coordinates must be finite")
+
+    invalid = (
+        (box_array[:, 0] >= box_array[:, 2])
+        | (box_array[:, 1] >= box_array[:, 3])
+    )
+
+    if np.any(invalid):
+        idx = np.flatnonzero(invalid)[0]
+        raise ValueError(
+            f"Invalid box at index {idx}: {box_array[idx]}"
+        )
+
+    return box_array
+
+def compute_iou_matrix(
+    reference_boxes: BoxesArray,
+    detected_boxes: BoxesArray,
+) -> IoUMatrix:
+
+    references = _as_boxes_array(reference_boxes)
+    detections = _as_boxes_array(detected_boxes)
+
+    # Ref shape: (M, 4) -> converti en (M, 1, 4)
+    # Det shape: (N, 4) -> converti en (1, N, 4)
+    ref_expanded = references[:, np.newaxis, :]
+    det_expanded = detections[np.newaxis, :, :]
+
+    # Extraction des coordonnées des coins (x1, y1, x2, y2)
+    # Le broadcasting applique la comparaison (M, 1) vs (1, N) -> (M, N)
+    inter_x1 = np.maximum(ref_expanded[..., 0], det_expanded[..., 0])
+    inter_y1 = np.maximum(ref_expanded[..., 1], det_expanded[..., 1])
+    inter_x2 = np.minimum(ref_expanded[..., 2], det_expanded[..., 2])
+    inter_y2 = np.minimum(ref_expanded[..., 3], det_expanded[..., 3])
+
+    # Largeur et hauteur de la zone d'intersection
+    inter_w = np.maximum(0.0, inter_x2 - inter_x1)
+    inter_h = np.maximum(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+
+    # Calcul des surfaces (aires) individuelles
+    area1 = (
+        (references[:, 2] - references[:, 0])
+        * (references[:, 3] - references[:, 1])
+        )
+
+    area2 = (
+        (detections[:, 2] - detections[:, 0])
+        * (detections[:, 3] - detections[:, 1])
+        )
+
+    # Alignement des shapes pour l'union via newaxis
+    union_area = area1[:, np.newaxis] + area2[np.newaxis, :] - inter_area
+
+    # Calcul final de l'Intersection over Union (IoU)
+    # Évite la division par zéro si l'union est nulle
+    return np.divide(inter_area, union_area, out=np.zeros_like(inter_area), where=union_area != 0)
+
 
 def greedy_match_candidates(candidates, threshold=0.5):
     """
@@ -134,28 +284,6 @@ def maximum_cardinality_match_from_score_matrix(matrix, threshold=0.5):
             taille_couplage += 1
     return taille_couplage, det_to_ref
 
-def build_reward_matrix(matrix, threshold):
-    R = len(matrix)
-    if R == 0:
-        return []
-    D = len(matrix[0])
-    if any(len(row) != D for row in matrix):
-        raise ValueError("Score matrix must be rectangular")
-    B = min(R, D) + 1
-
-    reward_matrix = []
-    for idx_ref in range(len(matrix)):
-        row = []
-        for idx_det in range(len(matrix[idx_ref])):
-            score = matrix[idx_ref][idx_det]
-            if score >= threshold:
-                row.append(B + score)
-            else:
-                row.append(0.0)
-        row.extend([0.0] * R)
-        reward_matrix.append(row)
-    return reward_matrix
-
 def optimal_match_from_score_matrix(matrix, threshold):
     """
     Compute an optimal one-to-one assignment for scores in [0, 1].
@@ -194,6 +322,60 @@ def optimal_match_from_score_matrix(matrix, threshold):
             matches.append((score, row_idx, col_idx))
 
     return matches
+
+######################################
+# "build_reward_matrix()" from Numpy #
+######################################
+SCORE_MAT_NDIM = 2
+def _as_score_matrix(matrix) -> IoUMatrix:
+    raw = np.asarray(matrix)
+
+    # Python empty sequence: normalize to canonical empty BoxesArray.
+    if raw.shape == (0,):
+        return np.empty((0, 0), dtype=np.float32)
+
+    if SCORE_MAT_NDIM != raw.ndim:
+        raise ValueError(
+            f"Score matrix must have shape (N, M), "
+            f"got {raw.shape}"
+        )
+
+    if not np.issubdtype(raw.dtype, np.number):
+        raise TypeError(
+            f"Score matrix coordinates must be numeric, got dtype {raw.dtype}"
+        )
+
+    score_array = raw.astype(np.float32, copy=False)
+
+    if not np.all(np.isfinite(score_array)):
+        raise ValueError("Score matrix values must be finite")
+
+    if np.any((score_array < 0.0) | (score_array > 1.0)):
+        raise ValueError("Score matrix values must be in [0, 1]")
+
+    return score_array
+
+def build_reward_matrix(matrix, threshold):
+    scores = _as_score_matrix(matrix)
+    bool_mask = scores >= threshold
+    R, D = scores.shape
+    B = min(R, D) + 1
+    reward_scores = np.where(
+        bool_mask,
+        B + scores,
+        0.0,
+        )
+    dummy = np.zeros((R, R), dtype=np.float32)
+    reward_matrix = np.concatenate(
+        (reward_scores, dummy),
+        axis=1,
+        )
+    return reward_matrix
+
+############################################
+# "build_reward_matrix()" from Numpy - End #
+############################################
+
 
 def compute_detection_metrics(
     number_of_references,

@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 from pytest import approx
 from IoUTools.compute_iou import optimal_match_from_score_matrix, build_reward_matrix
@@ -19,7 +20,7 @@ REWARD_MATRIX = [
         [
             [3.70, 3.65, 0.0, 0.0],
             [3.68, 0.0,  0.0, 0.0]
-            ], id="valid_matrix"),
+            ], id="valid_score_matrix"),
     pytest.param(
         [
             [0.20, 0.30],
@@ -28,15 +29,74 @@ REWARD_MATRIX = [
         [
             [0.0, 0.0, 0.0, 0.0],
             [0.0, 0.0,  0.0, 0.0]
-            ], id="invalid_matrix")
-        ]
+            ], id="all_scores_below_threshold"),
+    pytest.param(
+        [
+            [0.20, 0.30],
+            [0.10, 0.5]
+            ], 0.5,
+        [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 3.5,  0.0, 0.0]
+            ], id="score_matrix_with_threshold_value"),
 
-## Testing reward matric build ##
+
+    pytest.param(
+        np.empty((0, 3), dtype=np.float32),
+        0.5,
+        np.empty((0, 3), dtype=np.float32),
+        id="score_matrix_0_3",
+        ),
+    pytest.param(
+        np.empty((2, 0), dtype=np.float32),
+        0.5,
+        np.zeros((2, 2), dtype=np.float32),
+        id="score_matrix_2_0",
+        ),
+    ]
+
 @pytest.mark.parametrize("score_matrix, threshold, expected_matrix", REWARD_MATRIX,)
 def test_reward_matrix(score_matrix, threshold, expected_matrix):
-    reward_matrix = build_reward_matrix(score_matrix, threshold)
-    assert(checkMatrixEqualityApprox(reward_matrix, expected_matrix))
+#    reward_matrix = build_reward_matrix(score_matrix, threshold)
+    reward_matrix_NUMPY = build_reward_matrix_NUMPY(score_matrix, threshold)
+#    np.testing.assert_allclose(reward_matrix, reward_matrix_NUMPY)
+    np.testing.assert_allclose(expected_matrix, reward_matrix_NUMPY)
 
+## Testing reward matrix build with empty matrices ##
+REWARD_MATRIX_EMPTY_SCORE = [
+    pytest.param(
+        [], 0.5,
+        (0, 0),
+        id="empty_score_matrix")
+    ]
+@pytest.mark.parametrize("score_matrix, threshold, expected_shape", REWARD_MATRIX_EMPTY_SCORE,)
+def test_reward_matrix_empty_score(score_matrix, threshold, expected_shape):
+    reward_matrix = build_reward_matrix_NUMPY(score_matrix, threshold)
+    assert reward_matrix.shape == expected_shape
+    assert reward_matrix.dtype == np.float32
+
+INVALID_SCORE_MATRICES = [
+    pytest.param(
+        [
+            [0.20, 1.1],
+            [0.10, 0.5],
+        ],
+        id="score_above_one",
+    ),
+    pytest.param(
+        [
+            [0.20, -0.1],
+            [0.10, 0.5],
+        ],
+        id="negative_score",
+    ),
+]
+
+
+@pytest.mark.parametrize("score_matrix", INVALID_SCORE_MATRICES)
+def test_reward_matrix_rejects_invalid_scores(score_matrix):
+    with pytest.raises(ValueError):
+        build_reward_matrix_NUMPY(score_matrix, 0.5)
 
 ########################################
 # Matching using linear_sum_assignment #
