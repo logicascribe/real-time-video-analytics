@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from pytest import approx
-from IoUTools.compute_iou import optimal_match_from_score_matrix, build_reward_matrix
+from IoUTools.compute_iou import build_reward_matrix, optimal_match_from_score_matrix
 from .matrix_utility import (
     isMatrix,
     checkMatrixDimEquality,
@@ -58,7 +58,7 @@ REWARD_MATRIX = [
 @pytest.mark.parametrize("score_matrix, threshold, expected_matrix", REWARD_MATRIX,)
 def test_reward_matrix(score_matrix, threshold, expected_matrix):
 #    reward_matrix = build_reward_matrix(score_matrix, threshold)
-    reward_matrix_NUMPY = build_reward_matrix_NUMPY(score_matrix, threshold)
+    reward_matrix_NUMPY = build_reward_matrix(score_matrix, threshold)
 #    np.testing.assert_allclose(reward_matrix, reward_matrix_NUMPY)
     np.testing.assert_allclose(expected_matrix, reward_matrix_NUMPY)
 
@@ -71,7 +71,7 @@ REWARD_MATRIX_EMPTY_SCORE = [
     ]
 @pytest.mark.parametrize("score_matrix, threshold, expected_shape", REWARD_MATRIX_EMPTY_SCORE,)
 def test_reward_matrix_empty_score(score_matrix, threshold, expected_shape):
-    reward_matrix = build_reward_matrix_NUMPY(score_matrix, threshold)
+    reward_matrix = build_reward_matrix(score_matrix, threshold)
     assert reward_matrix.shape == expected_shape
     assert reward_matrix.dtype == np.float32
 
@@ -96,11 +96,11 @@ INVALID_SCORE_MATRICES = [
 @pytest.mark.parametrize("score_matrix", INVALID_SCORE_MATRICES)
 def test_reward_matrix_rejects_invalid_scores(score_matrix):
     with pytest.raises(ValueError):
-        build_reward_matrix_NUMPY(score_matrix, 0.5)
+        build_reward_matrix(score_matrix, 0.5)
 
-########################################
-# Matching using linear_sum_assignment #
-########################################
+#############################################
+# Optimal match using linear_sum_assignment #
+#############################################
 # Ground truth:
 # GT0 = (100, 80, 180, 220)
 # GT1 = (300, 90, 390, 240)
@@ -133,8 +133,34 @@ MATCHING_PATTERNS = [
     ], 0.5, [ (0.80, 0, 0) ]
     , id="one_reference_is_impossible",
     ),
-    ]
 
+    # 4. Empty matrix (0, 3)
+    pytest.param(
+        np.empty((0, 3), dtype=np.float32),
+        0.5, [],
+        id="empty matrix_0_3"
+    ),
+    # 5. Empty matrix (2, 0)
+    pytest.param(
+        np.empty((2, 0), dtype=np.float32),
+        0.5, [],
+        id="empty matrix_2_0"
+    ),
+    # 6. Empty matrix (0, 0)
+    pytest.param(
+        np.empty((0, 0), dtype=np.float32),
+        0.5,
+        [],
+        id="empty_matrix_0_0",
+        ),
+
+    pytest.param(
+        [[0.5]],
+        0.5,
+        [(0.5, 0, 0)],
+        id="score_equal_to_threshold",
+        ),
+    ]
 
 ## Testing linear_sum_assignment ##
 @pytest.mark.parametrize("score_matrix, threshold, expected_matrix", MATCHING_PATTERNS,)

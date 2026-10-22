@@ -284,7 +284,8 @@ def maximum_cardinality_match_from_score_matrix(matrix, threshold=0.5):
             taille_couplage += 1
     return taille_couplage, det_to_ref
 
-def optimal_match_from_score_matrix(matrix, threshold):
+
+def _old_optimal_match_from_score_matrix(matrix, threshold):
     """
     Compute an optimal one-to-one assignment for scores in [0, 1].
 
@@ -322,6 +323,65 @@ def optimal_match_from_score_matrix(matrix, threshold):
             matches.append((score, row_idx, col_idx))
 
     return matches
+
+################################################
+# "optimal_match_from_score_matrix" from Numpy #
+################################################
+def optimal_match_from_score_matrix(matrix, threshold):
+    """
+    Compute an optimal one-to-one assignment for scores in [0, 1].
+
+    Valid associations are given a cardinality bonus:
+        reward = B + score
+    where:
+        B = min(R, D) + 1
+
+    This ensures that maximizing the total reward first maximizes
+    the number of valid matches, and then, among assignments with
+    the same cardinality, maximizes the total score.
+
+    Associations with scores below the threshold are not retained.
+    """
+    scores = _as_score_matrix(matrix)
+
+    R, D = scores.shape
+
+    if R == 0 or D == 0:
+        return []
+
+    reward_matrix = build_reward_matrix(scores, threshold)
+
+    row_indices, col_indices = linear_sum_assignment(
+        reward_matrix,
+        maximize=True,
+    )
+
+    # Keep only assignments to real detection columns.
+    real_mask = col_indices < D
+
+    row_indices = row_indices[real_mask]
+    col_indices = col_indices[real_mask]
+
+    matched_scores = scores[row_indices, col_indices]
+
+    # Defensive filtering according to the public contract.
+    valid_mask = matched_scores >= threshold
+
+    row_indices = row_indices[valid_mask]
+    col_indices = col_indices[valid_mask]
+    matched_scores = matched_scores[valid_mask]
+
+    matches = [
+        (float(score), int(r), int(c))
+        for score, r, c in zip(
+            matched_scores,
+            row_indices,
+            col_indices,
+        )
+    ]
+
+    return matches
+
 
 ######################################
 # "build_reward_matrix()" from Numpy #
