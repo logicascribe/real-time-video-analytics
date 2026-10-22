@@ -281,6 +281,124 @@ class GAC:
 
         return self.edge_count / possible_edges
 
+"""
+1. vérifier que les deux entrées sont des vecteurs 1-D
+
+2. vérifier les degrés :
+      r_i >= 0
+      d_j >= 0
+
+3. vérifier les bornes :
+      r_i <= D
+      d_j <= R
+
+4. vérifier :
+      sum(r) == sum(d)
+
+5. trier r et d décroissants
+
+6. pour k = 1 ... R :
+      left  = sum(r[:k])
+      right = sum(min(k, d_j))
+
+      si left > right :
+          return False
+
+7. return True
+"""
+def is_bipartite_graphical(
+    reference_degrees: DegreeArray,
+    detection_degrees: DegreeArray,
+    ) -> bool:
+    """
+    Return True if the two degree sequences can be realized
+    by a simple bipartite graph.
+
+    Uses the Gale-Ryser theorem.
+
+    Raises:
+    TypeError: if inputs are not NumPy arrays or do not contain integers.
+    ValueError: if inputs are not 1-D or contain negative degrees.
+    """
+
+# 1. Validate input types
+    if not isinstance(reference_degrees, np.ndarray):
+        raise TypeError(
+            "reference_degrees must be a NumPy ndarray."
+            )
+
+    if not isinstance(detection_degrees, np.ndarray):
+        raise TypeError(
+            "detection_degrees must be a NumPy ndarray."
+            )
+
+    if not np.issubdtype(reference_degrees.dtype, np.integer):
+        raise TypeError(
+            "reference_degrees must contain integers."
+            )
+
+    if not np.issubdtype(detection_degrees.dtype, np.integer):
+        raise TypeError(
+            "detection_degrees must contain integers."
+            )
+
+    # 2. Degree sequences must be 1-D
+    if reference_degrees.ndim != 1:
+        raise ValueError(
+            "reference_degrees must be a 1-D array."
+            )
+
+    if detection_degrees.ndim != 1:
+        raise ValueError(
+            "detection_degrees must be a 1-D array."
+            )
+
+    R_size = reference_degrees.size
+    D_size = detection_degrees.size
+
+    # 3. Degrees must be non-negative
+    if (
+        np.any(reference_degrees < 0)
+        or np.any(detection_degrees < 0)
+        ):
+        raise ValueError(
+            "Degrees must be >= 0."
+            )
+
+    # 4. Individual degree bounds
+    if np.any(reference_degrees > D_size):
+        return False
+
+    if np.any(detection_degrees > R_size):
+        return False
+
+    # 5. Both partitions must describe the same number of edges
+    reference_edge_count = int(reference_degrees.sum())
+    detection_edge_count = int(detection_degrees.sum())
+
+    if reference_edge_count != detection_edge_count:
+        return False
+
+    # 6. Gale-Ryser requires non-increasing sequences
+    sorted_r = np.sort(reference_degrees)[::-1]
+    sorted_d = np.sort(detection_degrees)[::-1]
+
+    # 7. Gale-Ryser inequalities
+    #
+    # For every k in {1, ..., R}:
+    #
+    #   sum(r[0:k]) <= sum_j min(k, d_j)
+    #
+    left_cumsum = np.cumsum(sorted_r)
+    for k in range(1, R_size + 1):
+        left = left_cumsum[k - 1]
+        right = np.minimum(k, sorted_d).sum()
+
+        if left > right:
+            return False
+
+    return True
+
 ########################
 ## Fin Generation GAC ##
 ########################
