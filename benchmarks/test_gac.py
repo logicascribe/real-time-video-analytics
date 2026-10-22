@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from .generate_patterns import (GAC)
 
+from .generate_patterns import GAC
 
 def test_gac_properties():
     matrix = np.array(

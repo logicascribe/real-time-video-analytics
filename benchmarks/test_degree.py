@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
 from .generate_patterns import (
+    GAC,
     BipartiteDegreeGenerator,
-    ProblemSize
+    ProblemSize,
+    is_bipartite_graphical,
 )
 
 
@@ -166,3 +168,172 @@ def test_detection_degree_above_reference_count_raises():
                 detections=4,
             ),
         )
+
+
+def test_gale_ryser_graphical_sequences():
+    references = np.array(
+        [2, 2, 1, 1],
+        dtype=np.int64,
+    )
+
+    detections = np.array(
+        [2, 2, 2],
+        dtype=np.int64,
+    )
+
+    assert is_bipartite_graphical(
+        references,
+        detections,
+    )
+
+
+def test_gale_ryser_non_graphical_sequences():
+    references = np.array(
+        [2, 2, 0],
+        dtype=np.int64,
+    )
+
+    detections = np.array(
+        [3, 1, 0],
+        dtype=np.int64,
+    )
+
+    assert not is_bipartite_graphical(
+        references,
+        detections,
+    )
+
+def test_gale_ryser_input_order_does_not_matter():
+    references = np.array(
+        [1, 2, 1, 2],
+        dtype=np.int64,
+    )
+
+    detections = np.array(
+        [2, 2, 2],
+        dtype=np.int64,
+    )
+
+    assert is_bipartite_graphical(
+        references,
+        detections,
+    )
+
+#######
+
+def test_gale_ryser_different_edge_counts_are_not_graphical():
+    reference_degrees = np.array(
+        [2, 1],
+        dtype=np.int64,
+    )
+
+    detection_degrees = np.array(
+        [1, 1],
+        dtype=np.int64,
+    )
+
+    assert not is_bipartite_graphical(
+        reference_degrees,
+        detection_degrees,
+    )
+
+
+def test_gale_ryser_reference_degree_above_partition_size_is_not_graphical():
+    reference_degrees = np.array(
+        [3],
+        dtype=np.int64,
+    )
+
+    detection_degrees = np.array(
+        [1, 1],
+        dtype=np.int64,
+    )
+
+    # One reference cannot be connected to three vertices
+    # when only two detection vertices exist.
+    assert not is_bipartite_graphical(
+        reference_degrees,
+        detection_degrees,
+    )
+
+
+def test_gale_ryser_negative_degree_raises():
+    reference_degrees = np.array(
+        [2, -1],
+        dtype=np.int64,
+    )
+
+    detection_degrees = np.array(
+        [1, 0],
+        dtype=np.int64,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Degrees must be >= 0",
+    ):
+        is_bipartite_graphical(
+            reference_degrees,
+            detection_degrees,
+        )
+
+
+def test_gale_ryser_non_integer_degrees_raise():
+    reference_degrees = np.array(
+        [1.0, 1.0],
+        dtype=np.float32,
+    )
+
+    detection_degrees = np.array(
+        [1, 1],
+        dtype=np.int64,
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="reference_degrees must contain integers",
+    ):
+        is_bipartite_graphical(
+            reference_degrees,
+            detection_degrees,
+        )
+
+
+def test_gale_ryser_non_1d_array_raises():
+    reference_degrees = np.array(
+        [
+            [1, 1],
+            [1, 1],
+        ],
+        dtype=np.int64,
+    )
+
+    detection_degrees = np.array(
+        [2, 2],
+        dtype=np.int64,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="reference_degrees must be a 1-D array",
+    ):
+        is_bipartite_graphical(
+            reference_degrees,
+            detection_degrees,
+        )
+
+def test_gale_ryser_empty_graph_is_graphical():
+    reference_degrees = np.array(
+        [],
+        dtype=np.int64,
+    )
+
+    detection_degrees = np.array(
+        [],
+        dtype=np.int64,
+    )
+
+    assert is_bipartite_graphical(
+        reference_degrees,
+        detection_degrees,
+    )
