@@ -5,9 +5,15 @@ from .generate_patterns import (
     GAC,
     DegreeSequences,
     GACBuilder,
+    GACRandomizer,
 )
 
-
+common_matrix = np.array(
+    [
+        [True,  False, False],
+        [True,  True,  False],
+        [False, True,  True],
+    ])
 
 def test_gac_properties():
     matrix = np.array(
@@ -120,3 +126,191 @@ def test_gac_builder_preserves_degree_sequences():
     )
 
     assert gac.edge_count == degree_sequences.edge_count
+
+## Randomization
+
+# class DegreeSequences:
+#     reference_degrees: DegreeArray
+#     detection_degrees: DegreeArray
+# builder = GACBuilder()          # construction du builder
+# gac = builder(degrees)          # appel de builder.__call__()
+#     np.testing.assert_array_equal(
+#         gac.reference_degrees,
+#         np.array([1, 2, 2], dtype=np.int64),
+#     )
+
+#     np.testing.assert_array_equal(
+#         gac.detection_degrees,
+#         np.array([2, 2, 1], dtype=np.int64),
+#     )
+# GACBuilder
+# GACRandomizer
+
+def test_gac_randomizer_performs_switch():
+    original = GAC(
+        np.array(
+            [
+                [True, False],
+                [False, True],
+            ],
+            dtype=np.bool_,
+        )
+    )
+
+    randomizer = GACRandomizer(seed=42)
+
+    randomized = randomizer(
+        original,
+        num_switches=1,
+    )
+
+    expected = np.array(
+        [
+            [False, True],
+            [True, False],
+        ],
+        dtype=np.bool_,
+    )
+
+    np.testing.assert_array_equal(
+        randomized.target_adjacency,
+        expected,
+    )
+
+def test_gac_randomizer_num_switches_zero():
+    original = GAC(
+        np.array(
+            [
+                [True, False],
+                [False, True],
+            ],
+            dtype=np.bool_,
+        )
+    )
+
+    randomizer = GACRandomizer(seed=42)
+
+    randomized = randomizer(
+        original,
+        num_switches=0,
+    )
+
+    expected = np.array(
+        [
+            [True, False],
+            [False, True],
+        ],
+        dtype=np.bool_,
+    )
+
+    np.testing.assert_array_equal(
+        randomized.target_adjacency,
+        expected,
+    )
+
+def test_gac_randomizer_less_than_2_edges():
+    original = GAC(
+        np.array(
+            [
+                [True, False],
+            ],
+            dtype=np.bool_,
+        )
+    )
+
+    randomizer = GACRandomizer(seed=42)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Could perform only ",
+    ):
+        randomized = randomizer(
+            original,
+            num_switches=1,
+            )
+
+def test_gac_randomizer_on_full_graph():
+    gac = GAC(
+        np.array(
+            [
+                [True, True, True],
+                [True, True, True],
+            ],
+            dtype=np.bool_,
+        )
+    )
+
+    with pytest.raises(RuntimeError):
+        GACRandomizer(seed=42)(
+            gac,
+            num_switches=1,
+            )
+
+
+def test_gac_randomizer_preserves_degrees():
+    reference_degrees = np.array(
+        [1, 2, 2],
+        dtype=np.int64,
+    )
+    detection_degrees = np.array(
+        [2, 2, 1],
+        dtype=np.int64,
+    )
+
+    degree_sequences = DegreeSequences(
+        reference_degrees,
+        detection_degrees,
+    )
+
+    builder = GACBuilder()
+    original = builder(degree_sequences)
+
+    randomizer = GACRandomizer(42)
+    randomized = randomizer(original, 3)
+
+    np.testing.assert_array_equal(
+        randomized.reference_degrees,
+        original.reference_degrees,
+    )
+
+    np.testing.assert_array_equal(
+        randomized.detection_degrees,
+        original.detection_degrees,
+    )
+
+    assert randomized.edge_count == original.edge_count
+
+    assert not np.array_equal(
+        randomized.target_adjacency,
+        original.target_adjacency,
+        )
+
+def test_gac_randomizer_is_reproducible_with_same_seed():
+    reference_degrees = np.array(
+        [1, 2, 2],
+        dtype=np.int64,
+    )
+    detection_degrees = np.array(
+        [2, 2, 1],
+        dtype=np.int64,
+    )
+
+    degree_sequences = DegreeSequences(
+        reference_degrees,
+        detection_degrees,
+    )
+
+    builder = GACBuilder()
+    original = builder(degree_sequences)
+
+    randomizer1 = GACRandomizer(42)
+    randomized1 = randomizer1(original, 3)
+
+    randomizer2 = GACRandomizer(42)
+    randomized2 = randomizer2(original, 3)
+
+    np.testing.assert_array_equal(
+        randomized1.target_adjacency,
+        randomized2.target_adjacency,
+        )
+

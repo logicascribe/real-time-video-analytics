@@ -452,6 +452,68 @@ class GACBuilder:
 
         return gac
 
+
+class GACRandomizer:
+    def __init__(
+        self,
+        seed: int | None = None,
+    ) -> None:
+        self._rng = np.random.default_rng(seed)
+
+    def __call__(
+        self,
+        gac: GAC,
+        num_switches: int,
+    ) -> GAC:
+        if not isinstance(num_switches, (int, np.integer)):
+            raise TypeError("num_switches must be an integer.")
+        if num_switches < 0:
+            raise ValueError("num_switches must be >= 0.")
+        adjacency = gac.target_adjacency.copy()
+        successful_switches = 0
+        attempts = 0
+        max_attempts = 10 * num_switches
+
+        while (
+            attempts < max_attempts
+            and successful_switches < num_switches
+            ):
+            attempts += 1
+
+            edges = np.argwhere(adjacency)
+            if len(edges) < 2:
+                break
+            edge_indices = self._rng.choice(
+                len(edges),
+                size=2,
+                replace=False,
+                )
+            r1, d1 = edges[edge_indices[0]]
+            r2, d2 = edges[edge_indices[1]]
+
+            if (
+                r1 != r2
+                and d1 != d2
+                and not adjacency[r1, d2]
+                and not adjacency[r2, d1]
+                ):
+                adjacency[r1, d1] = False
+                adjacency[r2, d2] = False
+
+                adjacency[r1, d2] = True
+                adjacency[r2, d1] = True
+
+                successful_switches += 1
+
+        if successful_switches < num_switches:
+            raise RuntimeError(
+                f"Could perform only {successful_switches} "
+                f"of {num_switches} requested switches."
+                )
+        return GAC(adjacency)
+
+
+
 ########################
 ## Fin Generation GAC ##
 ########################
