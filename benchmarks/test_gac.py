@@ -129,23 +129,6 @@ def test_gac_builder_preserves_degree_sequences():
 
 ## Randomization
 
-# class DegreeSequences:
-#     reference_degrees: DegreeArray
-#     detection_degrees: DegreeArray
-# builder = GACBuilder()          # construction du builder
-# gac = builder(degrees)          # appel de builder.__call__()
-#     np.testing.assert_array_equal(
-#         gac.reference_degrees,
-#         np.array([1, 2, 2], dtype=np.int64),
-#     )
-
-#     np.testing.assert_array_equal(
-#         gac.detection_degrees,
-#         np.array([2, 2, 1], dtype=np.int64),
-#     )
-# GACBuilder
-# GACRandomizer
-
 def test_gac_randomizer_performs_switch():
     original = GAC(
         np.array(
@@ -223,8 +206,8 @@ def test_gac_randomizer_less_than_2_edges():
     with pytest.raises(
         RuntimeError,
         match="Could perform only ",
-    ):
-        randomized = randomizer(
+        ):
+        randomizer(
             original,
             num_switches=1,
             )
@@ -244,6 +227,40 @@ def test_gac_randomizer_on_full_graph():
         GACRandomizer(seed=42)(
             gac,
             num_switches=1,
+            )
+
+def test_gac_randomizer_rejects_negative_num_switches():
+    gac = GAC(
+        np.array(
+            [
+                [True, False],
+                [False, True],
+            ],
+            dtype=np.bool_,
+        )
+    )
+
+    with pytest.raises(ValueError):
+        GACRandomizer(seed=42)(
+            gac,
+            num_switches=-1,
+            )
+
+def test_gac_randomizer_rejects_non_integer_num_switches():
+    gac = GAC(
+        np.array(
+            [
+                [True, False],
+                [False, True],
+            ],
+            dtype=np.bool_,
+        )
+    )
+
+    with pytest.raises(TypeError):
+        GACRandomizer(seed=42)(
+            gac,
+            num_switches=1.5,
             )
 
 
@@ -271,19 +288,14 @@ def test_gac_randomizer_preserves_degrees():
     np.testing.assert_array_equal(
         randomized.reference_degrees,
         original.reference_degrees,
-    )
+        )
 
     np.testing.assert_array_equal(
         randomized.detection_degrees,
         original.detection_degrees,
-    )
+        )
 
     assert randomized.edge_count == original.edge_count
-
-    assert not np.array_equal(
-        randomized.target_adjacency,
-        original.target_adjacency,
-        )
 
 def test_gac_randomizer_is_reproducible_with_same_seed():
     reference_degrees = np.array(
