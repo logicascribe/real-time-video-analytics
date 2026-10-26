@@ -1,7 +1,13 @@
 import numpy as np
 import pytest
 
-from .generate_patterns import GAC
+from .generate_patterns import (
+    GAC,
+    DegreeSequences,
+    GACBuilder,
+)
+
+
 
 def test_gac_properties():
     matrix = np.array(
@@ -85,3 +91,32 @@ def test_empty_gac_has_zero_density():
     assert gac.size_D == 0
     assert gac.edge_count == 0
     assert gac.density == 0.0
+
+
+def test_gac_builder_preserves_degree_sequences():
+    degree_sequences = DegreeSequences(
+        reference_degrees=np.array(
+            [2, 2, 1, 1],
+            dtype=np.int64,
+        ),
+        detection_degrees=np.array(
+            [2, 2, 2],
+            dtype=np.int64,
+        ),
+    )
+
+    builder = GACBuilder()
+
+    gac = builder(degree_sequences)
+
+    np.testing.assert_array_equal(
+        gac.reference_degrees,
+        degree_sequences.reference_degrees,
+    )
+
+    np.testing.assert_array_equal(
+        gac.detection_degrees,
+        degree_sequences.detection_degrees,
+    )
+
+    assert gac.edge_count == degree_sequences.edge_count

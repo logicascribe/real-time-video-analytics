@@ -202,7 +202,7 @@ class GAC:
     Rows    : references R
     Columns : detections D
 
-    target_adjacency[i, j] is True iff detection j is a candidate
+    target_adjacency[i, j] is True if detection j is a candidate
     for reference i.
     """
 
@@ -398,6 +398,59 @@ def is_bipartite_graphical(
             return False
 
     return True
+
+class GACBuilder:
+    def __call__(
+        self,
+        degree_sequences: DegreeSequences,
+    ) -> GAC:
+
+        reference_degrees = degree_sequences.reference_degrees
+        detection_degrees = degree_sequences.detection_degrees
+
+        if not is_bipartite_graphical(
+            reference_degrees,
+            detection_degrees,
+        ):
+            raise ValueError(
+                "Degree sequences are not bipartite graphical."
+            )
+
+        R = reference_degrees.size
+        D = detection_degrees.size
+
+        adjacency = np.zeros(
+            (R, D),
+            dtype=np.bool_,
+        )
+
+        reference_remaining = reference_degrees.copy()
+        detection_remaining = detection_degrees.copy()
+
+        while np.any(reference_remaining > 0):
+            # Reference having the largest remaining degree.
+            ref_idx = int(np.argmax(reference_remaining))
+            degree = int(reference_remaining[ref_idx])
+
+            # Detections having the largest remaining degrees.
+            det_indices = np.argsort(
+                -detection_remaining,
+                kind="stable",
+                )[:degree]
+
+            if np.any(detection_remaining[det_indices] <= 0):
+                raise RuntimeError(
+                    "GAC construction failed despite graphical degree sequences."
+                    )
+
+            adjacency[ref_idx, det_indices] = True
+
+            detection_remaining[det_indices] -= 1
+            reference_remaining[ref_idx] = 0
+
+        gac = GAC(adjacency)
+
+        return gac
 
 ########################
 ## Fin Generation GAC ##
