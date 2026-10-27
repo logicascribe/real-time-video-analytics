@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from .generate_patterns import (
-    GAC,
+
+from ..degree_sequences import (
     BipartiteDegreeGenerator,
     ProblemSize,
     is_bipartite_graphical,

@@ -1,0 +1,306 @@
+#!/usr/bin/python3
+
+import numpy as np
+
+from dataclasses import dataclass
+from typing import Mapping, TypeAlias
+
+from numpy.typing import NDArray
+
+DegreeArray: TypeAlias = NDArray[np.int64]
+DegreeDistribution: TypeAlias = Mapping[int, float]
+
+
+@dataclass(frozen=True)
+class ProblemSize:
+    references: int
+    detections: int
+
+
+@dataclass
+class DegreeSequences:
+    reference_degrees: DegreeArray
+    detection_degrees: DegreeArray
+
+    @property
+    def edge_count(self) -> int:
+        return int(self.reference_degrees.sum())
+
+class BipartiteDegreeGenerator:
+    def __call__(
+        self,
+        reference_distribution: DegreeDistribution,
+        detection_distribution: DegreeDistribution,
+        size: ProblemSize,
+    ) -> DegreeSequences:
+
+        self._validate_problem_size(size)
+
+        reference_degrees = self._discretize_distribution(
+            distribution=reference_distribution,
+            n=size.references,
+        )
+
+        detection_degrees = self._discretize_distribution(
+            distribution=detection_distribution,
+            n=size.detections,
+        )
+
+        self._validate_degree_bounds(
+            reference_degrees,
+            max_degree=size.detections,
+            name="reference",
+        )
+
+        self._validate_degree_bounds(
+            detection_degrees,
+            max_degree=size.references,
+            name="detection",
+        )
+
+        reference_edges = int(reference_degrees.sum())
+        detection_edges = int(detection_degrees.sum())
+
+        if reference_edges != detection_edges:
+            raise ValueError(
+                "Incompatible degree distributions: "
+                f"reference side requires {reference_edges} edges, "
+                f"detection side requires {detection_edges} edges."
+            )
+
+        return DegreeSequences(
+            reference_degrees=reference_degrees,
+            detection_degrees=detection_degrees,
+        )
+
+    @staticmethod
+    def _discretize_distribution(
+        distribution: DegreeDistribution,
+        n: int,
+        ) -> DegreeArray:
+
+        BipartiteDegreeGenerator._validate_distribution(distribution)
+
+        degrees = np.asarray(
+            sorted(distribution.keys()),
+            dtype=np.int64,
+            )
+
+        probabilities = np.asarray(
+            [distribution[int(degree)] for degree in degrees],
+            dtype=np.float64,
+            )
+
+        expected_counts = probabilities * n
+
+        counts = np.floor(expected_counts).astype(np.int64)
+        remainders = expected_counts - counts
+
+        remaining = n - int(counts.sum())
+
+        if remaining > 0:
+            # Stable sort gives deterministic tie-breaking:
+            # smaller degree first when remainders are equal.
+            priority = np.argsort(-remainders, kind="stable")
+            counts[priority[:remaining]] += 1
+
+        degree_sequence = np.repeat(degrees, counts)
+
+        if degree_sequence.shape != (n,):
+            raise RuntimeError(
+                "Internal error while discretizing degree distribution."
+                )
+
+        return degree_sequence.astype(np.int64, copy=False)
+
+    @staticmethod
+    def _validate_distribution(
+        distribution: DegreeDistribution,
+        ) -> None:
+
+        if not distribution:
+            raise ValueError("Degree distribution must not be empty.")
+
+        for degree, probability in distribution.items():
+            if (
+                not isinstance(degree, (int, np.integer))
+                or isinstance(degree, (bool, np.bool_))
+                ):
+                raise TypeError(
+                    f"Degree must be an integer, got {degree!r}."
+                    )
+
+            if degree < 0:
+                raise ValueError(
+                    f"Degree must be >= 0, got {degree}."
+                    )
+
+            if not isinstance(
+                probability,
+                (int, float, np.integer, np.floating),
+                ):
+                raise TypeError(
+                    f"Probability must be numeric, got {probability!r}."
+                    )
+
+            if not np.isfinite(probability):
+                raise ValueError("Probability must be finite.")
+
+            if probability < 0:
+                raise ValueError("Probability must be >= 0.")
+
+
+            total = float(sum(distribution.values()))
+
+            if not np.isclose(total, 1.0, rtol=0.0, atol=1e-9):
+                raise ValueError(
+                    f"Probabilities must sum to 1.0, got {total}."
+                    )
+
+    @staticmethod
+    def _validate_problem_size(size: ProblemSize) -> None:
+        for name, value in (
+            ("references", size.references),
+            ("detections", size.detections),
+            ):
+            if (
+                not isinstance(value, (int, np.integer))
+                or isinstance(value, (bool, np.bool_))
+                ):
+                raise TypeError(
+                    f"{name} must be an integer, got {value!r}."
+                    )
+
+            if value < 0:
+                raise ValueError(
+                    f"{name} must be >= 0, got {value}."
+                    )
+
+    @staticmethod
+    def _validate_degree_bounds(
+        degrees: DegreeArray,
+        max_degree: int,
+        name: str,
+    ) -> None:
+        if np.any(degrees > max_degree):
+            raise ValueError(
+                f"{name} degree cannot exceed {max_degree}."
+            )
+
+"""
+1. vérifier que les deux entrées sont des vecteurs 1-D
+
+2. vérifier les degrés :
+      r_i >= 0
+      d_j >= 0
+
+3. vérifier les bornes :
+      r_i <= D
+      d_j <= R
+
+4. vérifier :
+      sum(r) == sum(d)
+
+5. trier r et d décroissants
+
+6. pour k = 1 ... R :
+      left  = sum(r[:k])
+      right = sum(min(k, d_j))
+
+      si left > right :
+          return False
+
+7. return True
+"""
+def is_bipartite_graphical(
+    reference_degrees: DegreeArray,
+    detection_degrees: DegreeArray,
+    ) -> bool:
+    """
+    Return True if the two degree sequences can be realized
+    by a simple bipartite graph.
+
+    Uses the Gale-Ryser theorem.
+
+    Raises:
+    TypeError: if inputs are not NumPy arrays or do not contain integers.
+    ValueError: if inputs are not 1-D or contain negative degrees.
+    """
+
+# 1. Validate input types
+    if not isinstance(reference_degrees, np.ndarray):
+        raise TypeError(
+            "reference_degrees must be a NumPy ndarray."
+            )
+
+    if not isinstance(detection_degrees, np.ndarray):
+        raise TypeError(
+            "detection_degrees must be a NumPy ndarray."
+            )
+
+    if not np.issubdtype(reference_degrees.dtype, np.integer):
+        raise TypeError(
+            "reference_degrees must contain integers."
+            )
+
+    if not np.issubdtype(detection_degrees.dtype, np.integer):
+        raise TypeError(
+            "detection_degrees must contain integers."
+            )
+
+    # 2. Degree sequences must be 1-D
+    if reference_degrees.ndim != 1:
+        raise ValueError(
+            "reference_degrees must be a 1-D array."
+            )
+
+    if detection_degrees.ndim != 1:
+        raise ValueError(
+            "detection_degrees must be a 1-D array."
+            )
+
+    R_size = reference_degrees.size
+    D_size = detection_degrees.size
+
+    # 3. Degrees must be non-negative
+    if (
+        np.any(reference_degrees < 0)
+        or np.any(detection_degrees < 0)
+        ):
+        raise ValueError(
+            "Degrees must be >= 0."
+            )
+
+    # 4. Individual degree bounds
+    if np.any(reference_degrees > D_size):
+        return False
+
+    if np.any(detection_degrees > R_size):
+        return False
+
+    # 5. Both partitions must describe the same number of edges
+    reference_edge_count = int(reference_degrees.sum())
+    detection_edge_count = int(detection_degrees.sum())
+
+    if reference_edge_count != detection_edge_count:
+        return False
+
+    # 6. Gale-Ryser requires non-increasing sequences
+    sorted_r = np.sort(reference_degrees)[::-1]
+    sorted_d = np.sort(detection_degrees)[::-1]
+
+    # 7. Gale-Ryser inequalities
+    #
+    # For every k in {1, ..., R}:
+    #
+    #   sum(r[0:k]) <= sum_j min(k, d_j)
+    #
+    left_cumsum = np.cumsum(sorted_r)
+    for k in range(1, R_size + 1):
+        left = left_cumsum[k - 1]
+        right = np.minimum(k, sorted_d).sum()
+
+        if left > right:
+            return False
+
+    return True
