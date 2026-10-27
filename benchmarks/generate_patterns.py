@@ -1,10 +1,14 @@
 #!/usr/bin/python3
 
 import numpy as np
+import time
 from enum import auto, Enum
 from dataclasses import dataclass
 from typing import Mapping, TypeAlias
 from numpy.typing import NDArray
+
+from IoUTools.compute_iou import BoxesArray, compute_iou_matrix
+
 
 ####################
 ## Generation GAC ##
@@ -513,7 +517,387 @@ class GACRandomizer:
         return GAC(adjacency)
 
 
+#######################
+## Generate patterns ##
+#######################
+def horizontal_shift_for_iou(
+    width: float,
+    iou: float,
+) -> float:
+    if not np.isfinite(width) or width <= 0:
+        raise ValueError(
+            f"width must be finite and > 0, got {width}."
+        )
 
-########################
-## Fin Generation GAC ##
-########################
+    if not np.isfinite(iou) or not 0.0 <= iou <= 1.0:
+        raise ValueError(
+            f"iou must be finite and in [0, 1], got {iou}."
+        )
+
+    return width * (1.0 - iou) / (1.0 + iou)
+
+
+@dataclass
+class BoxPattern:
+    reference_boxes: BoxesArray
+    detection_boxes: BoxesArray
+    target_adjacency: AdjacencyMatrix
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reference_boxes, np.ndarray):
+            raise TypeError(
+                "reference_boxes must be a NumPy ndarray."
+            )
+
+        if self.reference_boxes.ndim != 2:
+            raise ValueError(
+                "reference_boxes must be a 2-D array."
+            )
+
+        if self.reference_boxes.shape[1] != 4:
+            raise ValueError(
+                "reference_boxes must have shape (R, 4)."
+            )
+
+        if not isinstance(self.detection_boxes, np.ndarray):
+            raise TypeError(
+                "reference_boxes must be a NumPy ndarray."
+            )
+
+        if self.detection_boxes.ndim != 2:
+            raise ValueError(
+                "detection_boxes must be a 2-D array."
+            )
+
+        if self.detection_boxes.shape[1] != 4:
+            raise ValueError(
+                "detection_boxes must have shape (D, 4)."
+            )
+
+        R = self.reference_boxes.shape[0]
+        D = self.detection_boxes.shape[0]
+
+        if self.target_adjacency.shape != (R, D):
+            raise ValueError(
+                "target_adjacency must have shape (R, D), "
+                f"expected {(R, D)}, "
+                f"got {self.target_adjacency.shape}."
+            )
+
+        if self.target_adjacency.dtype != np.bool_:
+            raise TypeError(
+                "target_adjacency must have dtype np.bool_."
+            )
+
+
+def generate_isolated_pairs(
+    count: int,
+    width: float,
+    height: float,
+    target_iou: float,
+    spacing: float,
+) -> BoxPattern:
+
+    reference_boxes = np.empty(
+        (count, 4),
+        dtype=np.float32,
+    )
+
+    detection_boxes = np.empty(
+        (count, 4),
+        dtype=np.float32,
+    )
+
+    dx = horizontal_shift_for_iou(width, target_iou)
+
+    for idx in range(count):
+        x1 = idx * spacing
+        x2 = x1 + width
+        reference_boxes[idx] = (x1, 0.0, x2, height)
+        detection_x1 = x1 + dx
+        detection_x2 = x2 + dx
+        detection_boxes[idx] = (detection_x1, 0, detection_x2, height)
+    return BoxPattern(
+        reference_boxes=reference_boxes,
+        detection_boxes=detection_boxes,
+        target_adjacency=np.eye(
+            count,
+            dtype=np.bool_,
+            ),
+        )
+
+
+def box_from_center(cx, width, height):
+    x1 = cx - width / 2
+    x2 = cx + width / 2
+    return (x1, 0.0, x2, height)
+
+
+def generate_ambiguous_chain(
+    reference_count: int,
+    width: float,
+    height: float,
+    threshold: float,
+    iou_margin: float,
+) -> BoxPattern:
+    edge_iou = threshold + iou_margin
+
+    max_edge_iou = (
+        (1.0 + 2.0 * threshold)
+        / (2.0 + threshold)
+        )
+
+    if not 0.0 < threshold < 1.0:
+        raise ValueError(
+            f"threshold must be in (0, 1), got {threshold}."
+            )
+
+    if iou_margin <= 0.0:
+        raise ValueError(
+            f"iou_margin must be > 0, got {iou_margin}."
+            )
+
+    if edge_iou >= max_edge_iou:
+        raise ValueError(
+            "iou_margin is too large for the requested threshold: "
+            "non-neighboring boxes would become candidate edges."
+            )
+
+    detection_count = reference_count + 1
+    shift = horizontal_shift_for_iou(
+        width,
+        edge_iou,
+        )
+
+    spacing = 2.0 * shift
+    detection_centers = [
+        idx * spacing
+        for idx in range(detection_count)
+        ]
+
+    reference_centers = [
+        (idx + 0.5) * spacing
+        for idx in range(reference_count)
+        ]
+
+    target_adjacency = np.zeros(
+        (reference_count, detection_count),
+        dtype=np.bool_,
+        )
+
+    for idx in range(reference_count):
+        target_adjacency[idx, idx] = True
+        target_adjacency[idx, idx + 1] = True
+
+    reference_boxes = np.array(
+        [
+            box_from_center(cx, width, height)
+            for cx in reference_centers
+        ],
+        dtype=np.float32,
+    )
+
+    detection_boxes = np.array(
+        [
+            box_from_center(cx, width, height)
+            for cx in detection_centers
+        ],
+        dtype=np.float32,
+    )
+
+    return BoxPattern(
+        reference_boxes=reference_boxes,
+        detection_boxes=detection_boxes,
+        target_adjacency=target_adjacency,
+        )
+
+
+@dataclass(frozen=True)
+class BenchmarkScenario:
+    name: str
+    threshold: float
+    pattern: BoxPattern
+
+    @property
+    def reference_count(self) -> int:
+        return self.pattern.reference_boxes.shape[0]
+
+    @property
+    def detection_count(self) -> int:
+        return self.pattern.detection_boxes.shape[0]
+
+
+# Début avc 4 scenarios
+# isolated_5
+# isolated_50
+# ambiguous_chain_5
+# ambiguous_chain_50
+
+DEFAULT_BOX_WIDTH = 100.0
+DEFAULT_BOX_HEIGHT = 50.0
+DEFAULT_IOU_THRESHOLD = 0.5
+DEFAULT_MARGIN_RATIO = 0.5
+
+def make_isolated_scenario(
+    count: int,
+    name: str
+) -> BenchmarkScenario:
+    width = DEFAULT_BOX_WIDTH
+    height = DEFAULT_BOX_HEIGHT
+    threshold = DEFAULT_IOU_THRESHOLD
+    target_iou = 0.6
+    spacing = 200.0
+    box_pattern = generate_isolated_pairs(
+        count = count,
+        width = width,
+        height = height,
+        target_iou = target_iou,
+        spacing = spacing,
+        )
+    benchmark_scenario = BenchmarkScenario(
+        name = name,
+        threshold = threshold,
+        pattern = box_pattern
+        )
+    return benchmark_scenario
+
+def max_ambiguous_chain_iou_margin(
+    threshold: float,
+) -> float:
+    return (
+        (1.0 - threshold * threshold)
+        / (2.0 + threshold)
+    )
+
+
+def max_ambiguous_chain_iou_margin(
+    threshold: float,
+) -> float:
+    return (
+        (1.0 - threshold * threshold)
+        / (2.0 + threshold)
+    )
+
+
+def make_ambiguous_chain_scenario(
+    count: int,
+    name: str,
+    margin_ratio: float = DEFAULT_MARGIN_RATIO,
+) -> BenchmarkScenario:
+    width = DEFAULT_BOX_WIDTH
+    height = DEFAULT_BOX_HEIGHT
+    threshold = DEFAULT_IOU_THRESHOLD
+
+    if not 0.0 < margin_ratio < 1.0:
+        raise ValueError(
+            "margin_ratio must be in (0, 1), "
+            f"got {margin_ratio}."
+        )
+
+    max_iou_margin = max_ambiguous_chain_iou_margin(
+        threshold
+    )
+
+    iou_margin = margin_ratio * max_iou_margin
+
+    box_pattern = generate_ambiguous_chain(
+        reference_count=count,
+        width=width,
+        height=height,
+        threshold=threshold,
+        iou_margin=iou_margin,
+    )
+
+    return BenchmarkScenario(
+        name=name,
+        threshold=threshold,
+        pattern=box_pattern,
+    )
+
+
+#############################
+## Runner de benchmark IoU ##
+#############################
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    warmup_iterations: int
+    measured_iterations: int
+
+@dataclass(frozen=True)
+class BenchmarkResult:
+    scenario_name: str
+    reference_count: int
+    detection_count: int
+    mean_ns: float
+    median_ns: float
+    std_ns: float
+    p95_ns: float
+    p99_ns: float
+    min_ns: int
+    max_ns: int
+    durations_ns: np.ndarray
+
+def measure_perf(scenario: BenchmarkScenario):
+    start = time.perf_counter_ns()
+
+    compute_iou_matrix(
+        scenario.pattern.reference_boxes,
+        scenario.pattern.detection_boxes,
+        )
+    elapsed_ns = time.perf_counter_ns() - start
+    return elapsed_ns
+
+def benchmark_iou(
+    scenario: BenchmarkScenario,
+    config: BenchmarkConfig,
+) -> BenchmarkResult:
+    for _ in range(config.warmup_iterations):
+        compute_iou_matrix(
+            scenario.pattern.reference_boxes,
+            scenario.pattern.detection_boxes,
+        )
+
+    durations_ns = np.empty(
+        config.measured_iterations,
+        dtype=np.int64,
+    )
+
+    for idx in range(config.measured_iterations):
+        durations_ns[idx] = measure_perf(
+            scenario
+        )
+
+    return BenchmarkResult(
+        scenario_name=scenario.name,
+        reference_count=scenario.reference_count,
+        detection_count=scenario.detection_count,
+        mean_ns=float(np.mean(durations_ns)),
+        median_ns=float(np.median(durations_ns)),
+        std_ns=float(np.std(durations_ns)),
+        p95_ns=float(np.percentile(durations_ns, 95)),
+        p99_ns=float(np.percentile(durations_ns, 99)),
+        min_ns=int(np.min(durations_ns)),
+        max_ns=int(np.max(durations_ns)),
+        durations_ns=durations_ns,
+        )
+
+if __name__ == "__main__":
+    benchmark_scenario = make_ambiguous_chain_scenario(
+        count=5,
+        name="ambiguous_count_5",
+    )
+
+    benchmark_config = BenchmarkConfig(
+        warmup_iterations=10,
+        measured_iterations=100,
+    )
+
+    perf = benchmark_iou(
+        benchmark_scenario,
+        benchmark_config,
+    )
+
+    print(f"perf = {perf}")
+
+
